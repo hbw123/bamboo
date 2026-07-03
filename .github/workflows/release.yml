@@ -1,17 +1,35 @@
 name: Release
 
 # 推一个 v* 版本 tag（如 v0.1.0）即自动在 macOS 和 Windows 上打包，
-# 把产物挂到对应的 GitHub Release（默认草稿，检查无误后手动点发布）。
+# 并把产物上传到对应的 GitHub Release。
 on:
   push:
     tags: ['v*']
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag，例如 v0.1.0'
+        required: true
+        type: string
 
 permissions:
-  contents: write   # electron-builder 用 GITHUB_TOKEN 创建/上传 Release
+  contents: write
 
 jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 创建 Release（如果不存在）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 || \
+            gh release create "$TAG" --repo "$REPO" --title "Panda Pet $TAG" --notes "Automated release for $TAG."
+
   build:
+    needs: prepare-release
     strategy:
       fail-fast: false
       matrix:
@@ -19,10 +37,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: app/package-lock.json
 
@@ -30,8 +50,27 @@ jobs:
         working-directory: app
         run: npm install --no-audit --no-fund
 
-      - name: 打包并发布
+      - name: 打包
         working-directory: app
-        run: npx electron-builder --publish always ${{ runner.os == 'macOS' && '--mac --universal' || '--win' }}
+        run: npx electron-builder --publish never ${{ runner.os == 'macOS' && '--mac --universal' || '--win' }}
+
+      - name: 列出产物
+        working-directory: app
+        shell: bash
+        run: find dist -maxdepth 1 -type f -print
+
+      - name: 上传到 GitHub Release
+        working-directory: app
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          shopt -s nullglob
+          files=(dist/*.dmg dist/*.zip dist/*.exe dist/*.blockmap dist/*.yml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No release assets found in app/dist"
+            exit 1
+          fi
+          gh release upload "$TAG" "${files[@]}" --repo "$REPO" --clobber

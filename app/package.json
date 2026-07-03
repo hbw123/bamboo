@@ -27,7 +27,8 @@
     "appId": "com.pandapet.app",
     "productName": "Panda Pet",
     "publish": {
-      "provider": "github"
+      "provider": "github",
+      "releaseType": "release"
     },
     "directories": {
       "buildResources": "build",
