@@ -7,9 +7,9 @@ window.pre.onJobs(async (jobs) => {
   for (const job of jobs || []) {
     try {
       const r = await window.PandaImg.processToDataUrl(job.dataUrl, job.maxSize || 512);
-      out.push({ skin: job.skin, file: job.file, changed: r.changed, dataUrl: r.changed ? r.dataUrl : null });
+      out.push({ skin: job.skin, cacheKey: job.cacheKey, file: job.file, changed: r.changed, dataUrl: r.changed ? r.dataUrl : null });
     } catch (e) {
-      out.push({ skin: job.skin, file: job.file, error: String((e && e.message) || e) });
+      out.push({ skin: job.skin, cacheKey: job.cacheKey, file: job.file, error: String((e && e.message) || e) });
     }
   }
   window.pre.done(out);

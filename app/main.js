@@ -10,7 +10,8 @@ const { installHooks } = require('./lib/install-hooks');
 const BASE_DIR = pandaBaseDir();
 const SESSIONS_DIR = sessionsDir(BASE_DIR);
 const APP_DIR = __dirname;
-const SKINS_DIR = path.join(APP_DIR, 'assets', 'skins');
+const BUILTIN_SKINS_DIR = path.join(APP_DIR, 'assets', 'skins');
+const USER_SKINS_DIR = path.join(BASE_DIR, 'skins');
 const CACHE_DIR = path.join(BASE_DIR, 'cache', 'skins'); // 预处理后的透明/缩放图缓存
 
 // ---------------------------------------------------------------------------
@@ -38,7 +39,11 @@ function updateUserConfig(patch) {
 }
 
 // ---------------------------------------------------------------------------
-// 皮肤：assets/skins/<名>/，每套一个文件夹，按约定命名放若干 png 即可。
+// 皮肤：
+// - 内置：app/assets/skins/<名>/
+// - 用户：<用户配置目录>/skins/<名>/（Windows: %APPDATA%\PandaPet\skins，
+//   macOS: ~/Library/Application Support/PandaPet/skins）
+// 用户皮肤同名时覆盖内置皮肤。
 // ---------------------------------------------------------------------------
 
 // 状态 → 默认素材文件名。皮肤按这套命名放图即可，无需任何清单文件。
@@ -54,18 +59,20 @@ const DEFAULT_SPRITES = {
 };
 
 function listSkins() {
-  try {
-    return fs.readdirSync(SKINS_DIR, { withFileTypes: true })
-      // 有 idle.png（约定命名）就算一套皮肤；也兼容仍带 manifest.json 的旧皮肤。
-      .filter((d) => d.isDirectory() && (
-        fs.existsSync(path.join(SKINS_DIR, d.name, 'idle.png')) ||
-        fs.existsSync(path.join(SKINS_DIR, d.name, 'manifest.json'))
-      ))
-      .map((d) => d.name)
-      .sort();
-  } catch (_) {
-    return [];
+  const names = new Set();
+  for (const root of [BUILTIN_SKINS_DIR, USER_SKINS_DIR]) {
+    try {
+      for (const d of fs.readdirSync(root, { withFileTypes: true })) {
+        if (!d.isDirectory()) continue;
+        const dir = path.join(root, d.name);
+        // 有 idle.png（约定命名）就算一套皮肤；也兼容仍带 manifest.json 的旧皮肤。
+        if (fs.existsSync(path.join(dir, 'idle.png')) || fs.existsSync(path.join(dir, 'manifest.json'))) {
+          names.add(d.name);
+        }
+      }
+    } catch (_) { /* 用户目录不存在时忽略 */ }
   }
+  return [...names].sort();
 }
 
 function currentSkin(config) {
@@ -76,7 +83,18 @@ function currentSkin(config) {
 }
 
 function spritesDir(config) {
-  return path.join(SKINS_DIR, currentSkin(config));
+  const skin = currentSkin(config);
+  const userDir = path.join(USER_SKINS_DIR, skin);
+  if (fs.existsSync(path.join(userDir, 'idle.png')) || fs.existsSync(path.join(userDir, 'manifest.json'))) {
+    return userDir;
+  }
+  return path.join(BUILTIN_SKINS_DIR, skin);
+}
+
+function skinCacheKey(skin, dir) {
+  const rel = path.relative(USER_SKINS_DIR, dir);
+  const isUserSkin = rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+  return `${isUserSkin ? 'user' : 'builtin'}-${skin}`;
 }
 
 // 状态 → 文件名映射：默认走约定命名（DEFAULT_SPRITES）；皮肤目录若放了
@@ -140,9 +158,10 @@ function autoInstallHooks(config) {
 function skinImageJobs() {
   const jobs = [];
   for (const skin of listSkins()) {
-    const dir = path.join(SKINS_DIR, skin);
+    const dir = spritesDir({ skin });
+    const cacheKey = skinCacheKey(skin, dir);
     const files = [...new Set(Object.values(loadSprites(dir)).map(spriteFile).filter(Boolean))];
-    const meta = readJsonSafe(path.join(CACHE_DIR, skin, '.meta.json')) || {};
+    const meta = readJsonSafe(path.join(CACHE_DIR, cacheKey, '.meta.json')) || {};
     for (const file of files) {
       let st;
       try { st = fs.statSync(path.join(dir, file)); } catch (_) { continue; }
@@ -150,7 +169,7 @@ function skinImageJobs() {
       if (meta[file] && meta[file].sig === sig) continue; // 已处理且源未变
       let dataUrl;
       try { dataUrl = 'data:image/png;base64,' + fs.readFileSync(path.join(dir, file)).toString('base64'); } catch (_) { continue; }
-      jobs.push({ skin, file, sig, dataUrl });
+      jobs.push({ skin, cacheKey, file, sig, dataUrl });
     }
   }
   return jobs;
@@ -183,7 +202,7 @@ function preprocessSkins() {
       try {
         for (const r of results || []) {
           if (!r || r.error) continue;
-          const skinCache = path.join(CACHE_DIR, r.skin);
+          const skinCache = path.join(CACHE_DIR, r.cacheKey || r.skin);
           fs.mkdirSync(skinCache, { recursive: true });
           if (r.changed && r.dataUrl) {
             const b64 = r.dataUrl.split(',')[1] || '';
@@ -313,6 +332,7 @@ function buildTrayMenu() {
     { label: '显示 / 隐藏', click: () => { if (win) (win.isVisible() ? win.hide() : win.show()); } },
     { label: '皮肤', submenu: skinItems },
     { label: '打开配置文件夹', click: () => { try { fs.mkdirSync(BASE_DIR, { recursive: true }); } catch (_) {} shell.openPath(BASE_DIR); } },
+    { label: '打开皮肤文件夹', click: () => { try { fs.mkdirSync(USER_SKINS_DIR, { recursive: true }); } catch (_) {} shell.openPath(USER_SKINS_DIR); } },
     { type: 'separator' },
     { label: '退出', click: () => { app.quit(); } },
   ]);
@@ -322,7 +342,7 @@ function buildTrayMenu() {
 function trayIcon(config) {
   const candidates = [
     path.join(spritesDir(config), 'idle.png'),
-    path.join(SKINS_DIR, 'default', 'idle.png'), // 无图兜底：默认熊猫
+    path.join(BUILTIN_SKINS_DIR, 'default', 'idle.png'), // 无图兜底：默认熊猫
   ];
   let img = nativeImage.createEmpty();
   for (const p of candidates) {
@@ -370,6 +390,7 @@ ipcMain.handle('panda:init', () => {
   const lines = loadLines(config);
   const skin = currentSkin(config);
   const dir = spritesDir(config);
+  const cacheKey = skinCacheKey(skin, dir);
   const sprites = {};
   for (const [state, def] of Object.entries(loadSprites(dir))) {
     const name = spriteFile(def);
@@ -377,7 +398,7 @@ ipcMain.handle('panda:init', () => {
     // 优先用预处理缓存（已抠底+缩放）；没有则用源图（渲染层会即时抠底兜底）。
     // 以 base64 data URL 送图：渲染层要用 canvas 采样像素，而 file:// 图片画进 canvas
     // 会污染画布、无法 getImageData——data URL 不会。
-    const cacheFile = path.join(CACHE_DIR, skin, name);
+    const cacheFile = path.join(CACHE_DIR, cacheKey, name);
     const srcFile = path.join(dir, name);
     const file = fs.existsSync(cacheFile) ? cacheFile : srcFile;
     let dataUrl = null;
