@@ -4,6 +4,14 @@
   "description": "一只安静陪你写代码的熊猫桌宠 —— 感知 Claude Code 状态的展示层",
   "license": "MIT",
   "author": "Panda Pet",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hbw123/bamboo.git"
+  },
+  "homepage": "https://github.com/hbw123/bamboo#readme",
+  "bugs": {
+    "url": "https://github.com/hbw123/bamboo/issues"
+  },
   "main": "main.js",
   "scripts": {
     "start": "electron .",
