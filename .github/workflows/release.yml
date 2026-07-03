@@ -1,0 +1,37 @@
+name: Release
+
+# 推一个 v* 版本 tag（如 v0.1.0）即自动在 macOS 和 Windows 上打包，
+# 把产物挂到对应的 GitHub Release（默认草稿，检查无误后手动点发布）。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # electron-builder 用 GITHUB_TOKEN 创建/上传 Release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: 安装依赖
+        working-directory: app
+        run: npm install --no-audit --no-fund
+
+      - name: 打包并发布
+        working-directory: app
+        run: npx electron-builder --publish always ${{ runner.os == 'macOS' && '--mac --universal' || '--win' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

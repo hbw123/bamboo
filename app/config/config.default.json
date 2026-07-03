@@ -1,0 +1,43 @@
+{
+  "hooks": {
+    "autoInstall": true,
+    "settingsPath": null
+  },
+  "skin": "default",
+  "poll": {
+    "intervalMs": 800,
+    "staleMinutes": 15
+  },
+  "sound": {
+    "enabled": true,
+    "onDone": "assets/sounds/done.wav",
+    "onWaiting": "assets/sounds/waiting.wav"
+  },
+  "window": {
+    "width": 260,
+    "height": 220,
+    "alwaysOnTop": true,
+    "renderMode": "transparent"
+  },
+  "behavior": {
+    "doneLingerMs": 6000,
+    "idleDazeMs": 30000,
+    "idleSleepMs": 90000,
+    "night": { "startHour": 22, "endHour": 7 },
+    "notifyPerSession": true,
+    "alertBubbleMs": 5000,
+    "murmur": {
+      "enabled": true,
+      "minGapMs": 25000,
+      "chancePerTick": 0.02,
+      "showMs": 4200
+    },
+    "eggs": {
+      "enabled": true,
+      "bigDoneMinWorkMs": 600000,
+      "longWorkTotalMs": 14400000,
+      "cooldownMs": 1800000,
+      "longWorkRepeatMs": 10800000
+    }
+  }
+}

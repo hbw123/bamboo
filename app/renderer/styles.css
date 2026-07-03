@@ -1,0 +1,229 @@
+:root {
+  --card-bg: #ffffff;
+  --ink: #232b3a;
+  --muted: rgba(35, 43, 58, 0.55);
+  --panel-w: 232px;   /* 会话列表面板宽度，气泡也以此为最大宽度 */
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* hidden 属性的 display:none 会被 .panel/.placeholder 的 display 覆盖，这里兜底确保生效 */
+[hidden] { display: none !important; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+.stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 6px;
+}
+
+/* 内容列：气泡/面板在上，熊猫在下。窗口按此列的自然尺寸自适应。 */
+.inner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 18px; /* 给从头顶冒出的气泡留一点余量（多行时不被窗口顶裁切） */
+}
+
+/* 熊猫承载卡片：白底素材用柔和圆角卡片托住，看着是刻意设计而非白方块。
+   换成透明背景素材后，把 body 设为 class="transparent" 即可去掉卡片。*/
+.card {
+  position: relative;
+  width: 148px;
+  height: 148px;
+  border-radius: 26px;
+  background: var(--card-bg);
+  box-shadow: 0 10px 26px rgba(35, 43, 58, 0.18), 0 2px 6px rgba(35, 43, 58, 0.10);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+body.transparent .card {
+  background: transparent;
+  box-shadow: none;
+}
+
+.panda {
+  width: 132px;
+  height: 132px;
+  object-fit: contain;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+/* 透明模式（素材已抠底）：无卡片，给熊猫一层柔和投影，落地不悬浮 */
+body.transparent .panda {
+  filter: drop-shadow(0 6px 5px rgba(35, 43, 58, 0.22));
+}
+
+/* 工作中：复用 idle 图，靠这个轻微「呼吸」和空闲静止区分 */
+.panda.breathing { animation: breathe 3.4s ease-in-out infinite; }
+@keyframes breathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-3px) scale(1.02); }
+}
+
+/* 缺图占位：素材未提供时显示，明确提示待替换 */
+.placeholder {
+  position: absolute;
+  inset: 8px;
+  border: 2px dashed rgba(35, 43, 58, 0.28);
+  border-radius: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 8px;
+  background: rgba(35, 43, 58, 0.03);
+}
+
+/* 状态动作 */
+.card.bounce { animation: bounce 620ms ease; }
+@keyframes bounce {
+  0% { transform: translateY(0) scale(1); }
+  30% { transform: translateY(-10px) scale(1.04); }
+  55% { transform: translateY(0) scale(0.98); }
+  75% { transform: translateY(-4px) scale(1.01); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+.card.nudge { animation: nudge 900ms ease; }
+@keyframes nudge {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-4deg); }
+  75% { transform: rotate(4deg); }
+}
+
+/* 熊猫 + 气泡的定位容器 */
+.panda-wrap {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+/* 碎碎念 / 提醒气泡：从熊猫头顶「冒出来」——贴着头顶、尾巴朝下指向熊猫，
+   由熊猫处向上放大浮现（transform-origin 在底部）。 */
+.bubble {
+  position: absolute;
+  bottom: 70%;             /* 相对熊猫高度的百分比，浮在头顶上方（随尺寸缩放） */
+  left: 50%;
+  transform: translateX(-50%) translateY(10px) scale(0.8);
+  transform-origin: bottom center;
+  width: max-content;             /* 宽度跟整句走：短句小气泡，长句撑宽。
+                                     不能用 fit-content——绝对定位只设 left 时它会被
+                                     容器宽度夹断（气泡缩成很窄、长句被切成好几行）。 */
+  max-width: var(--panel-w);      /* 上限 = 会话列表面板宽度，超过才换行 */
+  padding: 7px 11px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.97);
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.4;
+  text-align: center;
+  /* 优先在标点处换行（配合 JS 在标点后插入 <wbr>）；某段无标点又超宽时才直接断字 */
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  box-shadow: 0 6px 16px rgba(35, 43, 58, 0.18);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 2;
+  transition: opacity 320ms ease, transform 340ms cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.bubble.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0) scale(1);
+}
+.bubble::after {
+  content: "";
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid rgba(255, 255, 255, 0.97);
+}
+
+/* 会话列表面板 */
+.panel {
+  width: var(--panel-w);
+  max-height: 232px;
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 16px;
+  box-shadow: 0 10px 26px rgba(35, 43, 58, 0.20);
+  padding: 10px 10px 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.panel-title {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 0 4px 6px;
+}
+.list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px;
+  border-radius: 9px;
+}
+.row:hover { background: rgba(35, 43, 58, 0.04); }
+.row .proj {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row .badge {
+  flex: none;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #fff;
+}
+.badge.working { background: #4a7cc7; }
+.badge.done { background: #5aa06a; }
+.badge.waiting { background: #d29a4a; }
+.badge.idle { background: #9aa2af; }
+.empty {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  padding: 10px 4px;
+}
