@@ -54,13 +54,13 @@ function toFileUrl(p) {
   return 'file://' + n.split('/').map(encodeURIComponent).join('/');
 }
 
-const spriteUrlCache = {}; // key -> 处理后的 data URL（自动抠底+缩放，见 imgproc.js）
+const spriteUrlCache = {}; // key -> 处理后的 data URL（缩放 + 可选抠底，见 imgproc.js）
 async function spriteUrl(key) {
   if (spriteUrlCache[key]) return spriteUrlCache[key];
   const sprite = SPRITES[key];
   if (!sprite || !sprite.dataUrl) return null;
   let url = sprite.dataUrl;
-  try { url = (await window.PandaImg.processToDataUrl(sprite.dataUrl, 512)).dataUrl; } catch (_) { /* 退回原图 */ }
+  try { url = (await window.PandaImg.processToDataUrl(sprite.dataUrl, 512, sprite.process || {})).dataUrl; } catch (_) { /* 退回原图 */ }
   spriteUrlCache[key] = url;
   return url;
 }

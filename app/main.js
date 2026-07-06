@@ -97,12 +97,32 @@ function skinCacheKey(skin, dir) {
   return `${isUserSkin ? 'user' : 'builtin'}-${skin}`;
 }
 
+function isUserSkinDir(dir) {
+  const rel = path.relative(USER_SKINS_DIR, dir);
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
 // 状态 → 文件名映射：默认走约定命名（DEFAULT_SPRITES）；皮肤目录若放了
 // manifest.json（可选，用于改文件名或让多个状态复用同一张图），则以它为准。
 function loadSprites(dir) {
   const manifest = readJsonSafe(path.join(dir, 'manifest.json'));
   if (manifest && manifest.sprites) return manifest.sprites;
   return DEFAULT_SPRITES;
+}
+
+function spriteProcessOptions(dir) {
+  const manifest = readJsonSafe(path.join(dir, 'manifest.json')) || {};
+  const processOpts = manifest.process && typeof manifest.process === 'object' ? manifest.process : {};
+  const out = {
+    // 用户皮肤常见照片/白色衣服，默认不自动抠白底；内置皮肤保持旧行为。
+    keyOut: processOpts.keyOut !== undefined ? processOpts.keyOut !== false : !isUserSkinDir(dir),
+  };
+  // 色键抠图：作者把背景涂成角色里不会出现的纯色，指定它即可精确抠掉（最稳，优先级最高）。
+  if (typeof processOpts.keyColor === 'string' && processOpts.keyColor.trim()) {
+    out.keyColor = processOpts.keyColor.trim();
+    if (Number.isFinite(processOpts.tolerance)) out.tolerance = processOpts.tolerance;
+  }
+  return out;
 }
 
 // 兼容：manifest 里每个状态的值可以是文件名字符串（推荐），也兼容 { file } 对象。
@@ -160,16 +180,17 @@ function skinImageJobs() {
   for (const skin of listSkins()) {
     const dir = spritesDir({ skin });
     const cacheKey = skinCacheKey(skin, dir);
+    const process = spriteProcessOptions(dir);
     const files = [...new Set(Object.values(loadSprites(dir)).map(spriteFile).filter(Boolean))];
     const meta = readJsonSafe(path.join(CACHE_DIR, cacheKey, '.meta.json')) || {};
     for (const file of files) {
       let st;
       try { st = fs.statSync(path.join(dir, file)); } catch (_) { continue; }
-      const sig = st.size + ':' + Math.round(st.mtimeMs);
+      const sig = st.size + ':' + Math.round(st.mtimeMs) + ':' + JSON.stringify(process);
       if (meta[file] && meta[file].sig === sig) continue; // 已处理且源未变
       let dataUrl;
       try { dataUrl = 'data:image/png;base64,' + fs.readFileSync(path.join(dir, file)).toString('base64'); } catch (_) { continue; }
-      jobs.push({ skin, cacheKey, file, sig, dataUrl });
+      jobs.push({ skin, cacheKey, file, sig, dataUrl, process });
     }
   }
   return jobs;
@@ -391,6 +412,7 @@ ipcMain.handle('panda:init', () => {
   const skin = currentSkin(config);
   const dir = spritesDir(config);
   const cacheKey = skinCacheKey(skin, dir);
+  const process = spriteProcessOptions(dir);
   const sprites = {};
   for (const [state, def] of Object.entries(loadSprites(dir))) {
     const name = spriteFile(def);
@@ -405,7 +427,7 @@ ipcMain.handle('panda:init', () => {
     try {
       dataUrl = 'data:image/png;base64,' + fs.readFileSync(file).toString('base64');
     } catch (_) { /* 缺图 → 渲染层显示占位 */ }
-    sprites[state] = { dataUrl };
+    sprites[state] = { dataUrl, process };
   }
   const sounds = {};
   for (const key of ['onDone', 'onWaiting']) {
