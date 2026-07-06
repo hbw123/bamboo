@@ -15,6 +15,9 @@ node_modules/
 app/node_modules/
 app/dist/
 
+# 私有皮肤（自家照片等，不提交；共享皮肤放 online/）
+app/assets/skins/local/
+
 # IDE
 .idea/
 .vscode/

@@ -3,7 +3,7 @@
     "autoInstall": true,
     "settingsPath": null
   },
-  "skin": "default",
+  "skin": "熊猫",
   "poll": {
     "intervalMs": 800,
     "staleMinutes": 15

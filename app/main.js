@@ -10,8 +10,12 @@ const { installHooks } = require('./lib/install-hooks');
 const BASE_DIR = pandaBaseDir();
 const SESSIONS_DIR = sessionsDir(BASE_DIR);
 const APP_DIR = __dirname;
-const BUILTIN_SKINS_DIR = path.join(APP_DIR, 'assets', 'skins');
-const USER_SKINS_DIR = path.join(BASE_DIR, 'skins');
+const SKINS_DIR = path.join(APP_DIR, 'assets', 'skins');
+const ONLINE_SKINS_DIR = path.join(SKINS_DIR, 'online'); // 共享皮肤，进代码仓库
+const LOCAL_SKINS_DIR = path.join(SKINS_DIR, 'local');   // 私有皮肤，不进仓库（gitignore）
+const USER_SKINS_DIR = path.join(BASE_DIR, 'skins');     // 装机版用户自己加的皮肤
+// 扫描顺序，后者覆盖前者同名皮肤：共享 < 本地私有 < 用户目录
+const SKIN_ROOTS = [ONLINE_SKINS_DIR, LOCAL_SKINS_DIR, USER_SKINS_DIR];
 const CACHE_DIR = path.join(BASE_DIR, 'cache', 'skins'); // 预处理后的透明/缩放图缓存
 
 // ---------------------------------------------------------------------------
@@ -39,11 +43,10 @@ function updateUserConfig(patch) {
 }
 
 // ---------------------------------------------------------------------------
-// 皮肤：
-// - 内置：app/assets/skins/<名>/
-// - 用户：<用户配置目录>/skins/<名>/（Windows: %APPDATA%\PandaPet\skins，
-//   macOS: ~/Library/Application Support/PandaPet/skins）
-// 用户皮肤同名时覆盖内置皮肤。
+// 皮肤，三处来源（后者覆盖前者同名）：
+// - 共享：app/assets/skins/online/<名>/   进代码仓库、公开分享
+// - 私有：app/assets/skins/local/<名>/    在仓库里但被 gitignore，不提交（自家照片等）
+// - 用户：<用户配置目录>/skins/<名>/       装机版用户自己加的
 // ---------------------------------------------------------------------------
 
 // 状态 → 默认素材文件名。皮肤按这套命名放图即可，无需任何清单文件。
@@ -58,48 +61,54 @@ const DEFAULT_SPRITES = {
   night: 'night.png',
 };
 
+// 某个根目录下若有这套皮肤（有 idle.png 或 manifest.json）就返回它的目录，否则 null。
+function skinDirIn(root, skin) {
+  const dir = path.join(root, skin);
+  if (fs.existsSync(path.join(dir, 'idle.png')) || fs.existsSync(path.join(dir, 'manifest.json'))) return dir;
+  return null;
+}
+
 function listSkins() {
   const names = new Set();
-  for (const root of [BUILTIN_SKINS_DIR, USER_SKINS_DIR]) {
+  for (const root of SKIN_ROOTS) {
     try {
       for (const d of fs.readdirSync(root, { withFileTypes: true })) {
-        if (!d.isDirectory()) continue;
-        const dir = path.join(root, d.name);
-        // 有 idle.png（约定命名）就算一套皮肤；也兼容仍带 manifest.json 的旧皮肤。
-        if (fs.existsSync(path.join(dir, 'idle.png')) || fs.existsSync(path.join(dir, 'manifest.json'))) {
-          names.add(d.name);
-        }
+        if (d.isDirectory() && skinDirIn(root, d.name)) names.add(d.name);
       }
-    } catch (_) { /* 用户目录不存在时忽略 */ }
+    } catch (_) { /* 目录不存在时忽略 */ }
   }
   return [...names].sort();
 }
 
+const DEFAULT_SKIN = '熊猫';
+
 function currentSkin(config) {
-  const want = (config && config.skin) || 'default';
+  const want = (config && config.skin) || DEFAULT_SKIN;
   const all = listSkins();
   if (all.includes(want)) return want;
-  return all.includes('default') ? 'default' : (all[0] || 'default');
+  return all.includes(DEFAULT_SKIN) ? DEFAULT_SKIN : (all[0] || DEFAULT_SKIN);
 }
 
 function spritesDir(config) {
   const skin = currentSkin(config);
-  const userDir = path.join(USER_SKINS_DIR, skin);
-  if (fs.existsSync(path.join(userDir, 'idle.png')) || fs.existsSync(path.join(userDir, 'manifest.json'))) {
-    return userDir;
+  // 从高优先级到低找：用户 > 本地私有 > 共享
+  for (let i = SKIN_ROOTS.length - 1; i >= 0; i--) {
+    const dir = skinDirIn(SKIN_ROOTS[i], skin);
+    if (dir) return dir;
   }
-  return path.join(BUILTIN_SKINS_DIR, skin);
+  return path.join(ONLINE_SKINS_DIR, skin); // 兜底
 }
 
-function skinCacheKey(skin, dir) {
-  const rel = path.relative(USER_SKINS_DIR, dir);
-  const isUserSkin = rel && !rel.startsWith('..') && !path.isAbsolute(rel);
-  return `${isUserSkin ? 'user' : 'builtin'}-${skin}`;
-}
-
-function isUserSkinDir(dir) {
-  const rel = path.relative(USER_SKINS_DIR, dir);
+function isUnder(dir, root) {
+  const rel = path.relative(root, dir);
   return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+// 缓存键区分来源，避免 online/local/用户 三处同名皮肤的缓存互相覆盖。
+function skinCacheKey(skin, dir) {
+  const scope = isUnder(dir, USER_SKINS_DIR) ? 'user'
+    : isUnder(dir, LOCAL_SKINS_DIR) ? 'local' : 'online';
+  return `${scope}-${skin}`;
 }
 
 // 状态 → 文件名映射：默认走约定命名（DEFAULT_SPRITES）；皮肤目录若放了
@@ -114,8 +123,9 @@ function spriteProcessOptions(dir) {
   const manifest = readJsonSafe(path.join(dir, 'manifest.json')) || {};
   const processOpts = manifest.process && typeof manifest.process === 'object' ? manifest.process : {};
   const out = {
-    // 用户皮肤常见照片/白色衣服，默认不自动抠白底；内置皮肤保持旧行为。
-    keyOut: processOpts.keyOut !== undefined ? processOpts.keyOut !== false : !isUserSkinDir(dir),
+    // 默认开启背景抠除：自动检测四角，纯色底才抠、照片等非纯色底自动跳过，很安全。
+    // 想彻底关掉（比如白衣白底的照片、主体含背景色）设 "process": { "keyOut": false }。
+    keyOut: processOpts.keyOut === undefined ? true : processOpts.keyOut !== false,
   };
   // 色键抠图：作者把背景涂成角色里不会出现的纯色，指定它即可精确抠掉（最稳，优先级最高）。
   if (typeof processOpts.keyColor === 'string' && processOpts.keyColor.trim()) {
@@ -186,7 +196,8 @@ function skinImageJobs() {
     for (const file of files) {
       let st;
       try { st = fs.statSync(path.join(dir, file)); } catch (_) { continue; }
-      const sig = st.size + ':' + Math.round(st.mtimeMs) + ':' + JSON.stringify(process);
+      // v2：抠图算法升级为按色相（绿幕），版本号变了让旧缓存失效、重新处理。
+      const sig = 'v2:' + st.size + ':' + Math.round(st.mtimeMs) + ':' + JSON.stringify(process);
       if (meta[file] && meta[file].sig === sig) continue; // 已处理且源未变
       let dataUrl;
       try { dataUrl = 'data:image/png;base64,' + fs.readFileSync(path.join(dir, file)).toString('base64'); } catch (_) { continue; }
@@ -363,7 +374,7 @@ function buildTrayMenu() {
 function trayIcon(config) {
   const candidates = [
     path.join(spritesDir(config), 'idle.png'),
-    path.join(BUILTIN_SKINS_DIR, 'default', 'idle.png'), // 无图兜底：默认熊猫
+    path.join(ONLINE_SKINS_DIR, DEFAULT_SKIN, 'idle.png'), // 无图兜底：默认熊猫
   ];
   let img = nativeImage.createEmpty();
   for (const p of candidates) {
